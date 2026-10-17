@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seen auto-reply</title>
+<style>
+:root{--bg:#f3f5f8;--ink:#14202e;--mute:#5d6b7c;--line:#d8dee6;--card:#fff;--accent:#0b5fd6;--ok:#16794a;--warn:#9a5b00;--err:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1620;--ink:#e6ebf2;--mute:#92a0b2;--line:#273445;--card:#16202c;--accent:#6aa5ff;--ok:#5fcf9a;--warn:#e8b058;--err:#ff8a80}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 64px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 12px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+.mute{color:var(--mute)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+.row:first-of-type{border-top:0}
+button,select,input{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+button{cursor:pointer}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;align-items:end}label{display:grid;gap:2px;font-size:13px;color:var(--mute)}
+.log{font:13px/1.4 ui-monospace,monospace;display:grid;grid-template-columns:150px 1fr;gap:8px;padding:4px 0}.error{color:var(--err)}.warn{color:var(--warn)}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+</style></head><body><main>
+<h1>Seen auto-reply</h1>
+<p class="mute">When someone reads a message your Page sent, the bot replies once, within Meta's rules.</p>
+<div id="app"></div></main>
+<script>
+const $=s=>document.querySelector(s), api=(p,m='GET',b)=>fetch('/api'+p,{method:m,headers:{'Content-Type':'application/json','x-csrf':'1'},body:b&&JSON.stringify(b)});
+const el=(t,props={},...kids)=>{const e=Object.assign(document.createElement(t),props);e.append(...kids);return e};
+const fmt=t=>t?new Date(t).toLocaleString():'never';
+async function load(){
+  const r=await api('/state');
+  if(r.status===401)return $('#app').replaceChildren(el('section',{},el('h2',{},'Connect Facebook'),el('p',{className:'mute'},'Sign in and choose the Pages this bot may manage.'),el('a',{href:'/auth/login'},el('button',{className:'primary'},'Connect Facebook'))));
+  const s=await r.json(), app=$('#app'); app.replaceChildren();
+  const pages=el('section',{},el('h2',{},'Pages'));
+  if(!s.pages.length)pages.append(el('p',{className:'mute'},'No Pages found. You need a role on a Facebook Page.'));
+  s.pages.forEach(p=>{const b=el('button',{className:p.enabled?'':'primary',onclick:async()=>{await api(`/pages/${p.id}/enabled`,'POST',{enabled:!p.enabled});load()}},p.enabled?'Disable bot':'Enable bot');
+    pages.append(el('div',{className:'row'},el('span',{},p.name+' ',el('span',{className:'tag'},p.needs_reauth?'Reconnect needed':p.enabled?'On':'Off')),b))});
+  pages.append(el('a',{href:'/auth/login'},el('button',{},'Connect another Page / refresh access')));
+  const form=el('form',{onsubmit:async e=>{e.preventDefault();const f=new FormData(e.target);
+    const [pageId,psid]=f.get('who').split('|');const r=await api('/rules','POST',{pageId,psid,message:f.get('message'),cooldownMin:f.get('cd')});
+    if(!r.ok)alert((await r.json()).error);else load()}});
+  const sel=el('select',{name:'who',required:true},el('option',{value:''},'Choose a person'));
+  s.conversations.forEach(c=>sel.append(el('option',{value:`${c.page_id}|${c.psid}`},`${s.pages.find(p=>p.id===c.page_id)?.name||c.page_id} · ID ${c.psid} · last wrote ${fmt(c.last_user_msg_at)}`)));
+  form.append(el('label',{},'Recipient',sel),el('label',{},'Message',el('input',{name:'message',value:'Hi',maxLength:640})),
+    el('label',{},'Wait between replies (minutes)',el('input',{name:'cd',type:'number',value:1440,min:1})),el('button',{className:'primary'},'Save recipient'));
+  const rules=el('section',{},el('h2',{},'Recipients'),
+    el('p',{className:'mute'},'People appear here after they message your Page. Meta does not let apps list contacts.'),form);
+  s.rules.forEach(r=>rules.append(el('div',{className:'row'},el('span',{},`ID ${r.psid} — “${r.message}” · last sent ${fmt(r.last_sent_at)}`),
+    el('span',{},el('button',{onclick:async()=>{await api(`/rules/${r.id}/enabled`,'POST',{enabled:!r.enabled});load()}},r.enabled?'Pause':'Resume'),' ',
+    el('button',{onclick:async()=>{if(confirm('Remove this recipient?')){await api(`/rules/${r.id}`,'DELETE');load()}}},'Remove')))));
+  const logs=el('section',{},el('h2',{},'Activity'));
+  if(!s.logs.length)logs.append(el('p',{className:'mute'},'Nothing yet. Events appear here as people read your messages.'));
+  s.logs.forEach(l=>logs.append(el('div',{className:'log '+l.level},el('span',{className:'mute'},fmt(l.at)),el('span',{},l.msg))));
+  app.append(pages,rules,logs);
+}
+load();setInterval(()=>{if(!document.activeElement.matches('input,select'))load()},15000);
+</script></body></html>
